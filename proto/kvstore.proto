@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package kv;
+
+// set(string key, string value) - sets the value of the given key
+// get(string key) - returns the value of a given key
+// getPrefix(string prefixKey) - returns a list of values whose keys start with prefixKey
+// note: the results returned by the server could potentially be large; you must take care of such cases.
+
+service KVStore {
+    rpc Set (SetRequest) returns (Empty) {}
+    rpc Get (GetRequest) returns (GetResponse) {}
+    rpc GetPrefix (GetPrefixRequest) returns (GetPrefixResponse) {}
+}
+
+message Empty {}
+
+// Set
+message SetRequest {
+    string key = 1;
+    string value = 2;
+}
+
+// Get
+message GetRequest {
+    string key = 1;
+}
+
+message GetResponse {
+    string value = 1;
+}
+
+// GetPrefix
+message GetPrefixRequest {
+    string key = 1;
+}
+
+message GetPrefixResponse {
+    repeated string values = 1;
+}
