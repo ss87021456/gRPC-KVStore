@@ -19,7 +19,11 @@ func main() {
 	}
 	defer conn.Close()
 	client := pb.NewKVStoreClient(conn)
+	setKey(client, "animals", "dog")
+	setKey(client, "apple", "good")
+	setKey(client, "fruits", "banana")
 	getKey(client, "animals")
+	GetPrefixKey(client, "a")
 }
 
 func getKey(client pb.KVStoreClient, key string) {
@@ -33,4 +37,30 @@ func getKey(client pb.KVStoreClient, key string) {
 		return
 	}
 	log.Printf("Get value: %s", result.GetValue())
+}
+
+func setKey(client pb.KVStoreClient, key string, value string) {
+	log.Printf("Setting key: %s, value: %s", key, key)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	_, err := client.Set(ctx, &pb.SetRequest{Key: key})
+	if err != nil {
+		log.Printf("failed to get key: %s: %v,", key, err)
+		return
+	}
+	// log.Printf("Set value: %s (checked by get)", result.Set())
+}
+
+func GetPrefixKey(client pb.KVStoreClient, key string) {
+	log.Printf("Get Prefix key: %s", key)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result, err := client.GetPrefix(ctx, &pb.GetPrefixRequest{Key: key})
+	if err != nil {
+		log.Printf("failed to get key: %s: %v,", key, err)
+		return
+	}
+	log.Printf("Matched Prefix keys: %s ", result.GetValues())
 }
