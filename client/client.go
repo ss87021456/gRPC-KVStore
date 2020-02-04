@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -19,48 +22,90 @@ func main() {
 	}
 	defer conn.Close()
 	client := pb.NewKVStoreClient(conn)
-	setKey(client, "animals", "dog")
-	setKey(client, "apple", "good")
-	setKey(client, "fruits", "banana")
-	getKey(client, "animals")
-	GetPrefixKey(client, "a")
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("> set, get or getprefix (i.e. set key value): ")
+		text, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Printf("failed to read from stdin: %s\n", err)
+			return
+		}
+
+		items := strings.Split(text, " ")
+		if len(items) < 2 {
+			continue
+		}
+
+		for i := range items {
+			items[i] = strings.TrimSpace(items[i])
+		}
+
+		switch items[0] {
+		case "get":
+			value, err := getKey(client, items[1])
+			if err != nil {
+				log.Printf("failed to get from server: %s\n", err)
+				continue
+			}
+			log.Printf("successfully get %s \n", value)
+
+		case "set":
+			if len(items) != 3 {
+				continue
+			}
+			if err := setKey(client, items[1], items[2]); err != nil {
+				log.Printf("failed to set to server: %s\n", err)
+				continue
+			}
+			log.Println("successfully published")
+
+		case "getprefix":
+			values, err := getPrefixKey(client, items[1])
+
+			if err != nil {
+				log.Printf("failed to get prefix from server: %s \n", err)
+				continue
+			}
+			log.Printf("successfully get %s \n", values)
+
+		default:
+			continue
+		}
+	}
 }
 
-func getKey(client pb.KVStoreClient, key string) {
+func getKey(client pb.KVStoreClient, key string) (string, error) {
 	log.Printf("Getting key: %s", key)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	result, err := client.Get(ctx, &pb.GetRequest{Key: key})
 	if err != nil {
-		log.Printf("failed to get key: %s: %v,", key, err)
-		return
+		return "", fmt.Errorf("failed to get key: %s: %v,", key, err)
 	}
-	log.Printf("Get value: %s", result.GetValue())
+	return result.GetValue(), nil
 }
 
-func setKey(client pb.KVStoreClient, key string, value string) {
-	log.Printf("Setting key: %s, value: %s", key, key)
+func setKey(client pb.KVStoreClient, key string, value string) error {
+	log.Printf("Setting key: %s, value: %s", key, value)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	_, err := client.Set(ctx, &pb.SetRequest{Key: key})
+	_, err := client.Set(ctx, &pb.SetRequest{Key: key, Value: value})
 	if err != nil {
-		log.Printf("failed to get key: %s: %v,", key, err)
-		return
+		return fmt.Errorf("failed to get key: %s: %s,", key, value)
 	}
-	// log.Printf("Set value: %s (checked by get)", result.Set())
+	return nil
 }
 
-func GetPrefixKey(client pb.KVStoreClient, key string) {
+func getPrefixKey(client pb.KVStoreClient, key string) ([]string, error) {
 	log.Printf("Get Prefix key: %s", key)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	result, err := client.GetPrefix(ctx, &pb.GetPrefixRequest{Key: key})
 	if err != nil {
-		log.Printf("failed to get key: %s: %v,", key, err)
-		return
+		return []string{}, fmt.Errorf("failed to get prefix key: %s: ", key)
 	}
-	log.Printf("Matched Prefix keys: %s ", result.GetValues())
+	return result.GetValues(), nil
 }

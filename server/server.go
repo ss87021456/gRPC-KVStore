@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
 
 	pb "github.com/ss87021456/gRPC-KVStore/proto"
 	"google.golang.org/grpc"
@@ -16,6 +17,7 @@ const (
 )
 
 type server struct {
+	mux           sync.Mutex
 	inMemoryCache map[string]string
 }
 
@@ -32,7 +34,9 @@ func (s *server) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixReques
 
 func (s *server) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
 	log.Printf("Set key: %s, value: %s", setReq.GetKey(), setReq.GetValue())
+	s.mux.Lock()
 	s.inMemoryCache[setReq.GetKey()] = setReq.GetValue()
+	s.mux.Unlock()
 	return &pb.Empty{}, nil
 }
 
