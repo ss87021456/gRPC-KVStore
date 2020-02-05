@@ -32,7 +32,7 @@ func (s *ServerMgr) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixReq
 	for k, v := range s.inMemoryCache {
 		fmt.Printf("key[%s] value[%s]\n", k, v)
 		if strings.Contains(k, getPrefixReq.GetKey()) {
-			returnList = append(returnList, k)
+			returnList = append(returnList, v)
 		}
 	}
 	return &pb.GetPrefixResponse{Values: returnList}, nil
