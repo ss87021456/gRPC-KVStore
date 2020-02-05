@@ -13,7 +13,7 @@ import (
 )
 
 type ServerMgr struct {
-	mux           sync.Mutex
+	lock          sync.RWMutex
 	inMemoryCache map[string]string
 }
 
@@ -28,6 +28,9 @@ func NewServerMgr() *ServerMgr {
 }
 
 func (s *ServerMgr) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixRequest) (*pb.GetPrefixResponse, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
 	returnList := []string{}
 	for k, v := range s.inMemoryCache {
 		fmt.Printf("key[%s] value[%s]\n", k, v)
@@ -40,14 +43,17 @@ func (s *ServerMgr) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixReq
 
 func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
 	log.Printf("Set key: %s, value: %s", setReq.GetKey(), setReq.GetValue())
-	s.mux.Lock()
+	s.lock.Lock()
 	s.inMemoryCache[setReq.GetKey()] = setReq.GetValue()
 	s.WriteToFile(FILENAME)
-	s.mux.Unlock()
+	s.lock.Unlock()
 	return &pb.Empty{}, nil
 }
 
 func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
 	key := getReq.GetKey()
 	log.Printf("Get key: %s", key)
 	if val, ok := s.inMemoryCache[key]; ok {
@@ -71,7 +77,7 @@ func (s *ServerMgr) makeData() interface{} {
 }
 
 func (s *ServerMgr) WriteToFile(filename string) {
-	oFile, _ := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
+	oFile, _ := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, os.ModePerm)
 	// clean up the file, but need to use a more efficient way
 	oFile.Truncate(0)
 	oFile.Seek(0, 0)
@@ -100,9 +106,9 @@ func (s *ServerMgr) SearchFromFile(filename string, key string) (string, error) 
 			log.Fatal("Encounter wrong json format data - 2...", err)
 		}
 		if m.Key == key {
-			s.mux.Lock()
+			s.lock.Lock()
 			s.inMemoryCache[m.Key] = m.Value
-			s.mux.Unlock()
+			s.lock.Unlock()
 			return m.Value, nil
 		}
 	}
@@ -135,9 +141,9 @@ func (s *ServerMgr) LoadFromFile(filename string) error {
 			log.Fatal("Encounter wrong json format data...", err)
 			return err
 		}
-		s.mux.Lock()
+		s.lock.Lock()
 		s.inMemoryCache[m.Key] = m.Value
-		s.mux.Unlock()
+		s.lock.Unlock()
 	}
 	// read closing bracket
 	if _, err := decoder.Token(); err != nil {
