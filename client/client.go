@@ -10,12 +10,19 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	pb "github.com/ss87021456/gRPC-KVStore/proto"
 )
 
+var kacp = keepalive.ClientParameters{
+	Time:                10 * time.Second, // send pings every 10 seconds if there is no activity
+	Timeout:             time.Second,      // wait 1 second for ping ack before considering the connection dead
+	PermitWithoutStream: true,             // send pings even without active streams
+}
+
 func main() {
-	conn, err := grpc.Dial("localhost:6000", grpc.WithInsecure())
+	conn, err := grpc.Dial("localhost:6000", grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
 	if err != nil {
 		fmt.Printf("failed to connect to server: %s", err)
 		return
@@ -93,7 +100,7 @@ func setKey(client pb.KVStoreClient, key string, value string) error {
 
 	_, err := client.Set(ctx, &pb.SetRequest{Key: key, Value: value})
 	if err != nil {
-		return fmt.Errorf("failed to get key: %s: %s,", key, value)
+		return fmt.Errorf("failed to get key: %s: %s, with error: %s", key, value, err)
 	}
 	return nil
 }
