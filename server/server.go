@@ -1,14 +1,11 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -40,46 +37,6 @@ var (
 	}
 )
 
-type serverMgr struct {
-	mux           sync.Mutex
-	inMemoryCache map[string]string
-}
-
-type JsonData struct {
-	Key, Value string
-}
-
-func (s *serverMgr) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixRequest) (*pb.GetPrefixResponse, error) {
-	returnList := []string{}
-	for k, v := range s.inMemoryCache {
-		fmt.Printf("key[%s] value[%s]\n", k, v)
-		if strings.Contains(k, getPrefixReq.GetKey()) {
-			returnList = append(returnList, k)
-		}
-	}
-	return &pb.GetPrefixResponse{Values: returnList}, nil
-}
-
-func (s *serverMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
-	log.Printf("Set key: %s, value: %s", setReq.GetKey(), setReq.GetValue())
-	s.mux.Lock()
-	s.inMemoryCache[setReq.GetKey()] = setReq.GetValue()
-	s.writeToFile(FILENAME)
-	s.mux.Unlock()
-	return &pb.Empty{}, nil
-}
-
-func (s *serverMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
-	key := getReq.GetKey()
-	log.Printf("Get key: %s", key)
-	if val, ok := s.inMemoryCache[key]; ok {
-		return &pb.GetResponse{Value: val}, nil
-	} else if fileVal, err := s.searchFromFile(FILENAME, key); err == nil {
-		return &pb.GetResponse{Value: fileVal}, nil
-	}
-	return &pb.GetResponse{}, fmt.Errorf("cannot get key: %s", key) // need key not found error
-}
-
 func main() {
 	lis, err := net.Listen("tcp", port)
 	if err != nil {
@@ -87,8 +44,8 @@ func main() {
 		return
 	}
 
-	s := &serverMgr{inMemoryCache: make(map[string]string)}
-	s.loadFromFile(FILENAME)
+	s := NewServerMgr()
+	s.LoadFromFile(FILENAME)
 
 	// recovery from panic
 	panichandler.InstallPanicHandler(func(r interface{}) {
@@ -107,12 +64,27 @@ func main() {
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
-	go func(s *serverMgr) {
-		<-c
-		fmt.Println("test gracefully shutdown")
-		s.writeToFile(FILENAME)
-		os.Exit(1)
+	// save to disk every 2 minutes
+	ticker := time.NewTicker(2 * time.Minute)
+	quit := make(chan struct{})
+	go func(s *ServerMgr) {
+		for {
+			select {
+			case <-ticker.C:
+				s.WriteToFile(FILENAME)
+			case <-quit:
+				ticker.Stop()
+			}
+		}
 	}(s)
+
+	go func(q chan struct{}, s *ServerMgr) {
+		<-c
+		close(quit)
+		log.Printf("graceful shutdown...")
+		s.WriteToFile(FILENAME)
+		os.Exit(1)
+	}(quit, s)
 
 	if err = grpcServer.Serve(lis); err != nil {
 		fmt.Printf("server has shut down: %v", err)

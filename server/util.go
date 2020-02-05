@@ -1,13 +1,64 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"strings"
+	"sync"
+
+	pb "github.com/ss87021456/gRPC-KVStore/proto"
 )
 
-func (s *serverMgr) makeData() interface{} {
+type ServerMgr struct {
+	mux           sync.Mutex
+	inMemoryCache map[string]string
+}
+
+type JsonData struct {
+	Key, Value string
+}
+
+func NewServerMgr() *ServerMgr {
+	return &ServerMgr{
+		inMemoryCache: make(map[string]string),
+	}
+}
+
+func (s *ServerMgr) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixRequest) (*pb.GetPrefixResponse, error) {
+	returnList := []string{}
+	for k, v := range s.inMemoryCache {
+		fmt.Printf("key[%s] value[%s]\n", k, v)
+		if strings.Contains(k, getPrefixReq.GetKey()) {
+			returnList = append(returnList, k)
+		}
+	}
+	return &pb.GetPrefixResponse{Values: returnList}, nil
+}
+
+func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
+	log.Printf("Set key: %s, value: %s", setReq.GetKey(), setReq.GetValue())
+	s.mux.Lock()
+	s.inMemoryCache[setReq.GetKey()] = setReq.GetValue()
+	s.WriteToFile(FILENAME)
+	s.mux.Unlock()
+	return &pb.Empty{}, nil
+}
+
+func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
+	key := getReq.GetKey()
+	log.Printf("Get key: %s", key)
+	if val, ok := s.inMemoryCache[key]; ok {
+		return &pb.GetResponse{Value: val}, nil
+	} else if fileVal, err := s.SearchFromFile(FILENAME, key); err == nil {
+		return &pb.GetResponse{Value: fileVal}, nil
+	}
+	return &pb.GetResponse{}, fmt.Errorf("cannot get key: %s", key) // need key not found error
+}
+
+func (s *ServerMgr) makeData() interface{} {
 	datas := []map[string]interface{}{}
 	for k, v := range s.inMemoryCache {
 		data := map[string]interface{}{
@@ -19,17 +70,20 @@ func (s *serverMgr) makeData() interface{} {
 	return datas
 }
 
-func (s *serverMgr) writeToFile(filename string) {
-	oFile, _ := os.OpenFile(filename, os.O_CREATE, os.ModePerm)
+func (s *ServerMgr) WriteToFile(filename string) {
+	oFile, _ := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	// clean up the file, but need to use a more efficient way
 	oFile.Truncate(0)
 	oFile.Seek(0, 0)
 	defer oFile.Close()
 	encoder := json.NewEncoder(oFile)
-	encoder.Encode(s.makeData())
+	err := encoder.Encode(s.makeData())
+	if err != nil {
+		log.Printf("fail to write to file %s", err)
+	}
 }
 
-func (s *serverMgr) searchFromFile(filename string, key string) (string, error) {
+func (s *ServerMgr) SearchFromFile(filename string, key string) (string, error) {
 	log.Printf("search from file and search key: %s", key)
 	iFile, _ := os.OpenFile(filename, os.O_RDONLY, os.ModePerm)
 	defer iFile.Close()
@@ -45,7 +99,6 @@ func (s *serverMgr) searchFromFile(filename string, key string) (string, error) 
 		if err != nil {
 			log.Fatal("Encounter wrong json format data - 2...", err)
 		}
-		// fmt.Printf("data: %v; value: %v \n", m.Key, m.Value)
 		if m.Key == key {
 			s.mux.Lock()
 			s.inMemoryCache[m.Key] = m.Value
@@ -60,7 +113,7 @@ func (s *serverMgr) searchFromFile(filename string, key string) (string, error) 
 	return "", fmt.Errorf("No matched key in stored json file\n")
 }
 
-func (s *serverMgr) loadFromFile(filename string) error {
+func (s *ServerMgr) LoadFromFile(filename string) error {
 	log.Printf("Initializing cache from file: %s\n", filename)
 	iFile, err := os.OpenFile(filename, os.O_RDONLY, os.ModePerm)
 	if err != nil {
