@@ -142,7 +142,7 @@ func (s *serverMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, 
 	return &pb.Empty{}, nil
 }
 
-func (s *server) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
+func (s *serverMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
 	key := getReq.GetKey()
 	log.Printf("Get key: %s", key)
 	if val, ok := s.inMemoryCache[key]; ok {
