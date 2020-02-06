@@ -45,7 +45,8 @@ func main() {
 	}
 
 	s := NewServerMgr()
-	s.LoadFromFile(FILENAME)
+	s.LoadFromHistoryLog("history.log")
+	// s.LoadFromSnapshot(FILENAME)
 
 	// recovery from panic
 	panichandler.InstallPanicHandler(func(r interface{}) {
@@ -67,7 +68,7 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				s.WriteToFile(FILENAME)
+				s.SnapShot(FILENAME)
 			case <-quit:
 				ticker.Stop()
 			}
@@ -81,7 +82,7 @@ func main() {
 		<-c
 		close(quit)
 		log.Printf("graceful shutdown...")
-		s.WriteToFile(FILENAME)
+		s.SnapShot(FILENAME)
 		os.Exit(1)
 	}(quit, s)
 
