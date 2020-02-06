@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"os"
 	"strings"
@@ -12,9 +13,19 @@ import (
 	pb "github.com/ss87021456/gRPC-KVStore/proto"
 )
 
+var (
+	MAPSIZE int = 32
+)
+
 type ServerMgr struct {
-	lock          sync.RWMutex
-	inMemoryCache map[string]string
+	inMemoryCache SharedCache
+}
+
+type SharedCache []*SingleCache
+
+type SingleCache struct {
+	lock  sync.RWMutex
+	cache map[string]string
 }
 
 type JsonData struct {
@@ -22,41 +33,58 @@ type JsonData struct {
 }
 
 func NewServerMgr() *ServerMgr {
-	return &ServerMgr{
-		inMemoryCache: make(map[string]string),
+	m := make(SharedCache, MAPSIZE)
+	for i := 0; i < MAPSIZE; i++ {
+		m[i] = &SingleCache{cache: make(map[string]string)}
 	}
+	return &ServerMgr{inMemoryCache: m}
+}
+
+func (s *ServerMgr) hash(key string) uint32 { // hash key to get map idx
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	log.Printf("string: %s, hash: %d\n", key, h.Sum32()%(uint32(MAPSIZE)))
+	return h.Sum32() % uint32(MAPSIZE)
 }
 
 func (s *ServerMgr) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixRequest) (*pb.GetPrefixResponse, error) {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
+	key := getPrefixReq.GetKey()
+	hashcode := s.hash(key)
+	s.inMemoryCache[hashcode].lock.RLock()
+	defer s.inMemoryCache[hashcode].lock.RUnlock()
 
 	returnList := []string{}
-	for k, v := range s.inMemoryCache {
-		fmt.Printf("key[%s] value[%s]\n", k, v)
-		if strings.Contains(k, getPrefixReq.GetKey()) {
-			returnList = append(returnList, v)
+	for idx := 0; idx < MAPSIZE; idx++ {
+		for k, v := range s.inMemoryCache[idx].cache {
+			fmt.Printf("key[%s] value[%s]\n", k, v)
+			if strings.Contains(k, getPrefixReq.GetKey()) {
+				returnList = append(returnList, v)
+			}
 		}
 	}
 	return &pb.GetPrefixResponse{Values: returnList}, nil
 }
 
 func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
-	log.Printf("Set key: %s, value: %s", setReq.GetKey(), setReq.GetValue())
-	s.lock.Lock()
-	s.inMemoryCache[setReq.GetKey()] = setReq.GetValue()
+	key := setReq.GetKey()
+	hashcode := s.hash(key)
+	log.Printf("Set key: %s, value: %s", key, setReq.GetValue())
+	s.inMemoryCache[hashcode].lock.Lock()
+
+	s.inMemoryCache[hashcode].cache[key] = setReq.GetValue()
 	s.WriteToFile(FILENAME)
-	s.lock.Unlock()
+	s.inMemoryCache[hashcode].lock.Unlock()
 	return &pb.Empty{}, nil
 }
 
 func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-
 	key := getReq.GetKey()
 	log.Printf("Get key: %s", key)
-	if val, ok := s.inMemoryCache[key]; ok {
+	hashcode := s.hash(key)
+	s.inMemoryCache[hashcode].lock.RLock()
+	defer s.inMemoryCache[hashcode].lock.RUnlock()
+
+	if val, ok := s.inMemoryCache[hashcode].cache[key]; ok {
 		return &pb.GetResponse{Value: val}, nil
 	} else if fileVal, err := s.SearchFromFile(FILENAME, key); err == nil {
 		return &pb.GetResponse{Value: fileVal}, nil
@@ -66,12 +94,14 @@ func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResp
 
 func (s *ServerMgr) makeData() interface{} {
 	datas := []map[string]interface{}{}
-	for k, v := range s.inMemoryCache {
-		data := map[string]interface{}{
-			"Key":   k,
-			"Value": v,
+	for i := 0; i < MAPSIZE; i++ {
+		for k, v := range s.inMemoryCache[i].cache {
+			data := map[string]interface{}{
+				"Key":   k,
+				"Value": v,
+			}
+			datas = append(datas, data)
 		}
-		datas = append(datas, data)
 	}
 	return datas
 }
@@ -90,6 +120,8 @@ func (s *ServerMgr) WriteToFile(filename string) {
 }
 
 func (s *ServerMgr) SearchFromFile(filename string, key string) (string, error) {
+	log.Printf("Get key: %s", key)
+	hashcode := s.hash(key)
 	log.Printf("search from file and search key: %s", key)
 	iFile, _ := os.OpenFile(filename, os.O_RDONLY, os.ModePerm)
 	defer iFile.Close()
@@ -106,9 +138,9 @@ func (s *ServerMgr) SearchFromFile(filename string, key string) (string, error) 
 			log.Fatal("Encounter wrong json format data - 2...", err)
 		}
 		if m.Key == key {
-			s.lock.Lock()
-			s.inMemoryCache[m.Key] = m.Value
-			s.lock.Unlock()
+			s.inMemoryCache[hashcode].lock.Lock()
+			s.inMemoryCache[hashcode].cache[m.Key] = m.Value
+			s.inMemoryCache[hashcode].lock.Unlock()
 			return m.Value, nil
 		}
 	}
@@ -130,7 +162,7 @@ func (s *ServerMgr) LoadFromFile(filename string) error {
 	decoder := json.NewDecoder(iFile)
 	// Read the array open bracket
 	if _, err := decoder.Token(); err != nil {
-		log.Fatal("Encounter wrong json format data...", err)
+		log.Fatal("Encounter wrong json format data1...", err)
 		return err
 	}
 	// while the array contains values
@@ -138,18 +170,20 @@ func (s *ServerMgr) LoadFromFile(filename string) error {
 		var m JsonData
 		err := decoder.Decode(&m)
 		if err != nil {
-			log.Fatal("Encounter wrong json format data...", err)
+			log.Fatal("Encounter wrong json format data3...", err)
 			return err
 		}
-		s.lock.Lock()
-		s.inMemoryCache[m.Key] = m.Value
-		s.lock.Unlock()
+		hashcode := s.hash(m.Key)
+		s.inMemoryCache[hashcode].lock.Lock()
+		s.inMemoryCache[hashcode].cache[m.Key] = m.Value
+		s.inMemoryCache[hashcode].lock.Unlock()
+
 	}
 	// read closing bracket
 	if _, err := decoder.Token(); err != nil {
 		log.Fatal("Encounter wrong json format data...", err)
 		return err
 	}
-	fmt.Println(s.inMemoryCache)
+	log.Printf("Finish initializing cache from file: %s\n", filename)
 	return nil
 }

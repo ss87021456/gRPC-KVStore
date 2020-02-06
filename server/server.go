@@ -60,10 +60,6 @@ func main() {
 	pb.RegisterKVStoreServer(grpcServer, s)
 	log.Printf("grpc server live successfully!\n")
 
-	// graceful shutdown
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-
 	// save to disk every 2 minutes
 	ticker := time.NewTicker(2 * time.Minute)
 	quit := make(chan struct{})
@@ -79,6 +75,9 @@ func main() {
 	}(s)
 
 	go func(q chan struct{}, s *ServerMgr) {
+		// graceful shutdown
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
 		close(quit)
 		log.Printf("graceful shutdown...")
