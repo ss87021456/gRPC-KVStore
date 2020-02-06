@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -45,16 +44,15 @@ func main() {
 	}
 
 	s := NewServerMgr()
-	s.LoadFromHistoryLog("history.log")
+	if _, err := os.Stat("history.log"); err == nil {
+		s.LoadFromHistoryLog("history.log")
+	}
 	// s.LoadFromSnapshot(FILENAME)
 
 	// recovery from panic
 	panichandler.InstallPanicHandler(func(r interface{}) {
 		log.Printf("panic happened: %v", r)
-		// TODO: need to do recovery here
-		// If there's a unfinish job, need to record it into log
-		// Therefore, after next time reboot. We can finish that job
-		// and then serve as normal for clients
+		// handle panic, seems never happen; thus no idea now
 	})
 	uIntOpt := grpc.UnaryInterceptor(panichandler.UnaryPanicHandler)
 	grpcServer := grpc.NewServer(uIntOpt, grpc.KeepaliveEnforcementPolicy(kaep), grpc.KeepaliveParams(kasp))
@@ -81,12 +79,12 @@ func main() {
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
 		close(quit)
-		log.Printf("graceful shutdown...")
 		s.SnapShot(FILENAME)
+		log.Printf("graceful shutdown, finished snapshot..")
 		os.Exit(1)
 	}(quit, s)
 
 	if err = grpcServer.Serve(lis); err != nil {
-		fmt.Printf("server has shut down: %v", err)
+		log.Printf("server has shut down: %v", err)
 	}
 }
