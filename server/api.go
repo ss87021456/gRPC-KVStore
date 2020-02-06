@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,7 +23,7 @@ var (
 type ServerMgr struct {
 	inMemoryCache SharedCache
 	lastSnapTime  int64
-	prefixLock    sync.RWMutex
+	logLock       sync.Mutex
 }
 
 type SharedCache []*SingleCache
@@ -55,9 +56,9 @@ func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResp
 func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
 	key, value := setReq.GetKey(), setReq.GetValue()
 	log.Printf("Set key: %s, value: %s", key, value)
-	writeAheadLog("start", key, value)
+	writeAheadLog(s, "start", key, value)
 	setHelper(s, key, value)
-	writeAheadLog("done", key, value)
+	writeAheadLog(s, "done", key, value)
 	return &pb.Empty{}, nil
 }
 
@@ -141,6 +142,9 @@ func (s *ServerMgr) LoadFromSnapshot(filename string) error {
 }
 
 func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
+	s.logLock.Lock()
+	defer s.logLock.Unlock()
+
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatal(err)
@@ -150,11 +154,38 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		arr := strings.Split(scanner.Text(), ",")
-
 		if arr[3] == "start" {
 			fmt.Println("Recover: ", arr[1], arr[2])
 			setHelper(s, arr[1], arr[2]) // arr layout -> [timestamp, key, value, mode]
 		}
 	}
+
+	newFile, err := os.OpenFile("new.log", os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	newFile.Truncate(0)
+	newFile.Seek(0, 0)
+	defer newFile.Close()
+	if err != nil {
+		log.Println("Failed to create ntemporary file: new.log", err)
+	}
+	for i := 0; i < MAPSIZE; i++ {
+		for k, v := range s.inMemoryCache[i].cache {
+			outStr := fmt.Sprintf("%v,%s,%s,%s\n", time.Now().Unix(), k, v, "start")
+			if _, err := newFile.WriteString(outStr); err != nil {
+				log.Println(err)
+			}
+			outStr = fmt.Sprintf("%v,%s,%s,%s\n", time.Now().Unix(), k, v, "done")
+			if _, err := newFile.WriteString(outStr); err != nil {
+				log.Println(err)
+			}
+		}
+	}
+	c := exec.Command("mv", "new.log", "history.log")
+	if err := c.Run(); err != nil {
+		fmt.Println("Exec mv new.log failed: ", err)
+	}
+
+	// here we need to filter out redundant log i.e. set should only reserved latest
+	// 1. write to another log ("new.log")
+	// 2. mv new.log history.log
 	return nil
 }

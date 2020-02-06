@@ -15,7 +15,9 @@ func hash(key string) uint32 { // hash key to get map idx
 	return h.Sum32() % uint32(MAPSIZE)
 }
 
-func writeAheadLog(mode string, key string, value string) {
+func writeAheadLog(s *ServerMgr, mode string, key string, value string) {
+	s.logLock.Lock()
+	defer s.logLock.Unlock()
 	logFile, err := os.OpenFile("history.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	defer logFile.Close()
 	if err != nil {
@@ -45,17 +47,16 @@ func setHelper(s *ServerMgr, key string, value string) {
 }
 
 func prefixHelper(s *ServerMgr, prefix string) []string {
-	s.prefixLock.RLock()
-	defer s.prefixLock.RUnlock()
-
 	returnList := []string{}
 	for idx := 0; idx < MAPSIZE; idx++ {
+		s.inMemoryCache[idx].lock.RLock()
 		for k, v := range s.inMemoryCache[idx].cache {
 			// log.Printf("key[%s] value[%s]\n", k, v)
 			if strings.Contains(k, prefix) {
 				returnList = append(returnList, v)
 			}
 		}
+		s.inMemoryCache[idx].lock.RUnlock()
 	}
 	return returnList
 }
