@@ -13,15 +13,12 @@ import (
 	"sync"
 	"time"
 
+	cmap "github.com/orcaman/concurrent-map"
 	pb "github.com/ss87021456/gRPC-KVStore/proto"
 )
 
-var (
-	MAPSIZE int = 32
-)
-
 type ServerMgr struct {
-	inMemoryCache SharedCache
+	inMemoryCache cmap.ConcurrentMap
 	lastSnapTime  int64
 	logLock       sync.Mutex
 }
@@ -38,11 +35,7 @@ type JsonData struct {
 }
 
 func NewServerMgr() *ServerMgr {
-	m := make(SharedCache, MAPSIZE)
-	for i := 0; i < MAPSIZE; i++ {
-		m[i] = &SingleCache{cache: make(map[string]string)}
-	}
-	return &ServerMgr{inMemoryCache: m}
+	return &ServerMgr{inMemoryCache: cmap.New()}
 }
 
 func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
@@ -56,9 +49,8 @@ func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResp
 func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
 	key, value := setReq.GetKey(), setReq.GetValue()
 	log.Printf("Set key: %s, value: %s", key, value)
-	writeAheadLog(s, "start", key, value)
+	writeAheadLog(s, key, value)
 	setHelper(s, key, value)
-	writeAheadLog(s, "done", key, value)
 	return &pb.Empty{}, nil
 }
 
@@ -87,14 +79,12 @@ func (s *ServerMgr) SnapShot(filename string) {
 
 func (s *ServerMgr) makeData() interface{} {
 	datas := []map[string]interface{}{}
-	for i := 0; i < MAPSIZE; i++ {
-		for k, v := range s.inMemoryCache[i].cache {
-			data := map[string]interface{}{
-				"Key":   k,
-				"Value": v,
-			}
-			datas = append(datas, data)
+	for m := range s.inMemoryCache.Iter() {
+		data := map[string]interface{}{
+			"Key":   m.Key,
+			"Value": m.Val,
 		}
+		datas = append(datas, data)
 	}
 	return datas
 }
@@ -154,12 +144,11 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		arr := strings.Split(scanner.Text(), ",")
-		if arr[3] == "start" {
-			fmt.Println("Recover: ", arr[1], arr[2])
-			setHelper(s, arr[1], arr[2]) // arr layout -> [timestamp, key, value, mode]
-		}
+		log.Printf("Recover: %s %s\n", arr[1], arr[2])
+		setHelper(s, arr[1], arr[2]) // arr layout -> [timestamp, key, value]
 	}
 
+	// perform log filtering for next time
 	newFile, err := os.OpenFile("new.log", os.O_CREATE|os.O_WRONLY, os.ModePerm)
 	newFile.Truncate(0)
 	newFile.Seek(0, 0)
@@ -167,16 +156,10 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 	if err != nil {
 		log.Println("Failed to create ntemporary file: new.log", err)
 	}
-	for i := 0; i < MAPSIZE; i++ {
-		for k, v := range s.inMemoryCache[i].cache {
-			outStr := fmt.Sprintf("%v,%s,%s,%s\n", time.Now().Unix(), k, v, "start")
-			if _, err := newFile.WriteString(outStr); err != nil {
-				log.Println(err)
-			}
-			outStr = fmt.Sprintf("%v,%s,%s,%s\n", time.Now().Unix(), k, v, "done")
-			if _, err := newFile.WriteString(outStr); err != nil {
-				log.Println(err)
-			}
+	for m := range s.inMemoryCache.Iter() {
+		outStr := fmt.Sprintf("%v,%s,%s\n", time.Now().Unix(), m.Key, m.Val)
+		if _, err := newFile.WriteString(outStr); err != nil {
+			log.Println(err)
 		}
 	}
 	c := exec.Command("mv", "new.log", "history.log")
@@ -184,8 +167,5 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 		fmt.Println("Exec mv new.log failed: ", err)
 	}
 
-	// here we need to filter out redundant log i.e. set should only reserved latest
-	// 1. write to another log ("new.log")
-	// 2. mv new.log history.log
 	return nil
 }

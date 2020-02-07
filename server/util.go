@@ -2,20 +2,13 @@ package main
 
 import (
 	"fmt"
-	"hash/fnv"
 	"log"
 	"os"
 	"strings"
 	"time"
 )
 
-func hash(key string) uint32 { // hash key to get map idx
-	h := fnv.New32a()
-	h.Write([]byte(key))
-	return h.Sum32() % uint32(MAPSIZE)
-}
-
-func writeAheadLog(s *ServerMgr, mode string, key string, value string) {
+func writeAheadLog(s *ServerMgr, key string, value string) {
 	s.logLock.Lock()
 	defer s.logLock.Unlock()
 	logFile, err := os.OpenFile("history.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
@@ -23,51 +16,40 @@ func writeAheadLog(s *ServerMgr, mode string, key string, value string) {
 	if err != nil {
 		log.Println("Failed to create history.log", err)
 	}
-	outStr := fmt.Sprintf("%v,%s,%s,%s\n", time.Now().Unix(), key, value, mode)
+	outStr := fmt.Sprintf("%v,%s,%s\n", time.Now().Unix(), key, value)
 	if _, err := logFile.WriteString(outStr); err != nil {
 		log.Println(err)
 	}
 }
 
 func getHelper(s *ServerMgr, key string) (string, error) {
-	hashcode := hash(key)
-	s.inMemoryCache[hashcode].lock.RLock()
-	defer s.inMemoryCache[hashcode].lock.RUnlock()
-	if val, ok := s.inMemoryCache[hashcode].cache[key]; ok {
-		return val, nil
+	// Retrieve item from map.
+	if tmp, ok := s.inMemoryCache.Get(key); ok {
+		log.Printf("key: %s val: %s", key, tmp)
+		return tmp.(string), nil
 	}
 	return "", fmt.Errorf("key: %s not exist", key)
 }
 
 func setHelper(s *ServerMgr, key string, value string) {
-	hashcode := hash(key)
-	s.inMemoryCache[hashcode].lock.Lock()
-	s.inMemoryCache[hashcode].cache[key] = value
-	s.inMemoryCache[hashcode].lock.Unlock()
+	s.inMemoryCache.Set(key, value)
 }
 
 func prefixHelper(s *ServerMgr, prefix string) []string {
+	// TODO here i think we can use concurrently access to speedup
 	returnList := []string{}
-	for idx := 0; idx < MAPSIZE; idx++ {
-		s.inMemoryCache[idx].lock.RLock()
-		for k, v := range s.inMemoryCache[idx].cache {
-			// log.Printf("key[%s] value[%s]\n", k, v)
-			if strings.Contains(k, prefix) {
-				returnList = append(returnList, v)
-			}
+	for m := range s.inMemoryCache.Iter() {
+		if strings.Contains(m.Key, prefix) {
+			returnList = append(returnList, string(m.Val.(string)))
 		}
-		s.inMemoryCache[idx].lock.RUnlock()
 	}
 	return returnList
 }
 
 func showCache(s *ServerMgr) {
 	fmt.Println("========= showCache ========")
-	for i := 0; i < MAPSIZE; i++ {
-		fmt.Println("Cache Idx", i)
-		for k, v := range s.inMemoryCache[i].cache {
-			fmt.Println(k, v)
-		}
+	for m := range s.inMemoryCache.Iter() {
+		log.Printf("key %s value %s", m.Key, m.Val)
 	}
 	fmt.Println("========= showCache ========")
 }

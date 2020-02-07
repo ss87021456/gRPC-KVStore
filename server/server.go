@@ -43,17 +43,17 @@ func main() {
 		return
 	}
 
-	s := NewServerMgr()
-	if _, err := os.Stat("history.log"); err == nil {
-		s.LoadFromHistoryLog("history.log")
-	}
-	// s.LoadFromSnapshot(FILENAME)
-
-	// recovery from panic
+	// recovery from grpc panic
 	panichandler.InstallPanicHandler(func(r interface{}) {
 		log.Printf("panic happened: %v", r)
 		// handle panic, seems never happen; thus no idea now
 	})
+
+	s := NewServerMgr()
+	if _, err := os.Stat("history.log"); err == nil {
+		s.LoadFromHistoryLog("history.log")
+	}
+
 	uIntOpt := grpc.UnaryInterceptor(panichandler.UnaryPanicHandler)
 	grpcServer := grpc.NewServer(uIntOpt, grpc.KeepaliveEnforcementPolicy(kaep), grpc.KeepaliveParams(kasp))
 	pb.RegisterKVStoreServer(grpcServer, s)
