@@ -4,8 +4,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
+
+	cmap "github.com/orcaman/concurrent-map"
 )
 
 func writeAheadLog(s *ServerMgr, key string, value string) {
@@ -36,14 +40,53 @@ func setHelper(s *ServerMgr, key string, value string) {
 }
 
 func prefixHelper(s *ServerMgr, prefix string) []string {
-	// TODO here i think we can use concurrently access to speedup
 	returnList := []string{}
-	for m := range s.inMemoryCache.Iter() {
-		if strings.Contains(m.Key, prefix) {
-			returnList = append(returnList, string(m.Val.(string)))
-		}
+	in := s.inMemoryCache.Iter()
+	workers := make([]<-chan string, runtime.NumCPU())
+	// fan-out, distribute to multiple workers
+	for i := 0; i < runtime.NumCPU(); i++ {
+		workers[i] = checkTuples(in, prefix)
+	}
+	// consume the merged output from  multiple workers
+	for res := range merge(workers...) {
+		returnList = append(returnList, res)
 	}
 	return returnList
+}
+
+func checkTuples(items <-chan cmap.Tuple, prefix string) <-chan string {
+	out := make(chan string) // maybe buffer will be helpful
+	go func() {
+		for item := range items {
+			if strings.Contains(item.Key, prefix) {
+				out <- item.Val.(string)
+			}
+		}
+		close(out)
+	}()
+	return out
+}
+
+func merge(cs ...<-chan string) <-chan string {
+	var wg sync.WaitGroup
+	out := make(chan string)
+
+	output := func(c <-chan string) {
+		for n := range c {
+			out <- n
+		}
+		wg.Done()
+	}
+	wg.Add(len(cs))
+	for _, c := range cs {
+		go output(c)
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+	return out
 }
 
 func showCache(s *ServerMgr) {
