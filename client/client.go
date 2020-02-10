@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -21,6 +22,15 @@ var kacp = keepalive.ClientParameters{
 	PermitWithoutStream: true,             // send pings even without active streams
 }
 
+func sendrequest(client pb.KVStoreClient, in <-chan string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for i := range in {
+		setKey(client, i, i)
+	}
+}
+
+var COUNT int = 10000
+
 func main() {
 	conn, err := grpc.Dial("localhost:6000", grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
 	if err != nil {
@@ -29,6 +39,29 @@ func main() {
 	}
 	defer conn.Close()
 	client := pb.NewKVStoreClient(conn)
+
+	start := time.Now()
+	in := make(chan string)
+	go func(count int, in chan string) {
+		for i := 0; i < count; i++ {
+			in <- fmt.Sprintf("%d", i)
+		}
+		close(in)
+	}(COUNT, in)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go sendrequest(client, in, &wg)
+	}
+	wg.Wait()
+	// for i := 0; i < COUNT; i++ {
+	// setKey(client, fmt.Sprintf("%d", i), fmt.Sprintf("%d", i))
+	// }
+
+	fmt.Println(getPrefixKey(client, "1"))
+	fmt.Println(time.Since(start)) // benchmark time
+
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("> set, get or getprefix (i.e. set key value): ")
