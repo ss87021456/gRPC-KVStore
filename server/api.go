@@ -49,7 +49,10 @@ func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResp
 func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
 	key, value := setReq.GetKey(), setReq.GetValue()
 	log.Printf("Set key: %s, value: %s", key, value)
-	writeAheadLog(s, key, value)
+	err := writeAheadLog(s, key, value)
+	if err != nil {
+		return &pb.Empty{}, nil
+	}
 	setHelper(s, key, value)
 	return &pb.Empty{}, nil
 }

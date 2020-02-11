@@ -12,18 +12,26 @@ import (
 	cmap "github.com/orcaman/concurrent-map"
 )
 
-func writeAheadLog(s *ServerMgr, key string, value string) {
+func writeAheadLog(s *ServerMgr, key string, value string) error {
 	s.logLock.Lock()
 	defer s.logLock.Unlock()
 	logFile, err := os.OpenFile("history.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	defer logFile.Close()
 	if err != nil {
 		log.Println("Failed to create history.log", err)
+		return err
 	}
 	outStr := fmt.Sprintf("%v,%s,%s\n", time.Now().Unix(), key, value)
 	if _, err := logFile.WriteString(outStr); err != nil {
 		log.Println(err)
+		return err
 	}
+	err = logFile.Sync() // ensure write to stable disk
+	if err != nil {
+		log.Println("Failed to sync into disk", err)
+		return err
+	}
+	return nil
 }
 
 func getHelper(s *ServerMgr, key string) (string, error) {
