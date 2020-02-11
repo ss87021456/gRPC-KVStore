@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"strings"
 	"sync"
@@ -22,14 +23,56 @@ var kacp = keepalive.ClientParameters{
 	PermitWithoutStream: true,             // send pings even without active streams
 }
 
-func sendrequest(client pb.KVStoreClient, in <-chan string, wg *sync.WaitGroup) {
+type node struct {
+	key    string
+	value  string
+	action int // 0: set; 1: get; 2:getPrefix
+}
+
+const keyLength = 128
+const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const (
+	letterIdxBits = 6                    // 6 bits to represent a letter index
+	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
+	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
+)
+
+// https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go
+func RandStringBytesMaskImpr(n int) string {
+	b := make([]byte, n)
+	// A rand.Int63() generates 63 random bits, enough for letterIdxMax letters!
+	for i, cache, remain := n-1, rand.Int63(), letterIdxMax; i >= 0; {
+		if remain == 0 {
+			cache, remain = rand.Int63(), letterIdxMax
+		}
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			b[i] = letterBytes[idx]
+			i--
+		}
+		cache >>= letterIdxBits
+		remain--
+	}
+
+	return string(b)
+}
+
+func sendrequest(client pb.KVStoreClient, in <-chan node, wg *sync.WaitGroup) {
 	defer wg.Done()
-	for i := range in {
-		setKey(client, i, i)
+	for n := range in {
+		switch n.action {
+		case 0:
+			setKey(client, n.key, n.value)
+		case 1:
+			getKey(client, n.key)
+		case 2:
+			getPrefixKey(client, n.key)
+		default:
+			log.Fatal("n.action error")
+		}
 	}
 }
 
-var COUNT int = 10000
+var COUNT int = 20
 
 func main() {
 	conn, err := grpc.Dial("localhost:6000", grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
@@ -41,10 +84,11 @@ func main() {
 	client := pb.NewKVStoreClient(conn)
 
 	start := time.Now()
-	in := make(chan string)
-	go func(count int, in chan string) {
+	in := make(chan node)
+	go func(count int, in chan node) {
 		for i := 0; i < count; i++ {
-			in <- fmt.Sprintf("%d", i)
+			n := node{key: RandStringBytesMaskImpr(keyLength), value: fmt.Sprintf("%d", i), action: rand.Intn(3)}
+			in <- n
 		}
 		close(in)
 	}(COUNT, in)
@@ -55,9 +99,6 @@ func main() {
 		go sendrequest(client, in, &wg)
 	}
 	wg.Wait()
-	// for i := 0; i < COUNT; i++ {
-	// setKey(client, fmt.Sprintf("%d", i), fmt.Sprintf("%d", i))
-	// }
 
 	fmt.Println(getPrefixKey(client, "1"))
 	fmt.Println(time.Since(start)) // benchmark time
