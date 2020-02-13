@@ -21,6 +21,7 @@ type ServerMgr struct {
 	inMemoryCache cmap.ConcurrentMap
 	lastSnapTime  int64
 	logLock       sync.Mutex
+	logFile       *os.File
 }
 
 type SharedCache []*SingleCache
@@ -34,8 +35,8 @@ type JsonData struct {
 	Key, Value string
 }
 
-func NewServerMgr() *ServerMgr {
-	return &ServerMgr{inMemoryCache: cmap.New()}
+func NewServerMgr(f *os.File) *ServerMgr {
+	return &ServerMgr{inMemoryCache: cmap.New(), logFile: f}
 }
 
 func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {

@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,9 +64,9 @@ func sendrequest(client pb.KVStoreClient, in <-chan node, wg *sync.WaitGroup) {
 	for n := range in {
 		switch n.action {
 		case 0:
-			setKey(client, n.key, n.value)
-		case 1:
 			getKey(client, n.key)
+		case 1:
+			setKey(client, n.key, n.value)
 		case 2:
 			getPrefixKey(client, n.key)
 		default:
@@ -74,15 +75,20 @@ func sendrequest(client pb.KVStoreClient, in <-chan node, wg *sync.WaitGroup) {
 	}
 }
 
-var COUNT int = 100000
+var COUNT int = 10000
 var serverIp = "localhost"
 var port = 6000
+var valueSize = 512
 var mode = "interative"
+var modeRW = "r"
 
 func main() {
 	flag.IntVar(&port, "p", port, "the target server's port")
 	flag.StringVar(&serverIp, "ip", serverIp, "the target server's ip address")
+	flag.IntVar(&valueSize, "size", valueSize, "value size")
+	flag.IntVar(&COUNT, "count", COUNT, "ops total count")
 	flag.StringVar(&mode, "mode", mode, "the mode of client, interative or benchmark")
+	flag.StringVar(&modeRW, "modeRW", modeRW, "the mode of client action, `r` for readonly, `rw` for 50% read 50% write")
 	flag.Parse()
 
 	log.Printf("After parsing...\n")
@@ -107,10 +113,31 @@ func main() {
 		var opsCount = make([]int, 3)
 		start := time.Now()
 
+		/*
+			for i := 0; i < COUNT; i++ {
+				n := node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(512), action: rand.Intn(2)}
+				opsCount[n.action]++
+				switch n.action {
+				case 0:
+					setKey(client, n.key, n.value)
+				case 1:
+					getKey(client, n.key)
+				case 2:
+					getPrefixKey(client, n.key)
+				default:
+					log.Fatal("n.action error")
+				}
+			}
+		*/
 		in := make(chan node)
 		go func(count int, in chan node) {
 			for i := 0; i < count; i++ {
-				n := node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(512), action: rand.Intn(2)}
+				var n node
+				if modeRW == "r" {
+					n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(1)}
+				} else if modeRW == "rw" {
+					n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(2)}
+				}
 				opsCount[n.action]++
 				in <- n
 			}
@@ -118,7 +145,7 @@ func main() {
 		}(COUNT, in)
 
 		var wg sync.WaitGroup
-		for i := 0; i < 4; i++ {
+		for i := 0; i < runtime.NumCPU(); i++ {
 			wg.Add(1)
 			go sendrequest(client, in, &wg)
 		}

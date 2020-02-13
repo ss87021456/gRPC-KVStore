@@ -50,13 +50,16 @@ func main() {
 		return
 	}
 
+	logFile, err := os.OpenFile("history.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
+	defer logFile.Close()
+
 	// recovery from grpc panic
 	panichandler.InstallPanicHandler(func(r interface{}) {
 		log.Printf("panic happened: %v", r)
 		// handle panic, seems never happen; thus no idea now
 	})
 
-	s := NewServerMgr()
+	s := NewServerMgr(logFile)
 	if _, err := os.Stat("history.log"); err == nil {
 		s.LoadFromHistoryLog("history.log")
 	}
