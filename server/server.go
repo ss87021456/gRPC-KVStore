@@ -1,10 +1,12 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -16,8 +18,9 @@ import (
 	panichandler "github.com/kazegusuri/grpc-panic-handler"
 )
 
-const (
-	port     string = ":6000"
+var (
+	port     int    = 6000
+	serverIp string = "localhost"
 	FILENAME string = "data.json"
 )
 
@@ -37,7 +40,11 @@ var (
 )
 
 func main() {
-	lis, err := net.Listen("tcp", port)
+	flag.IntVar(&port, "p", port, "the target server's port")
+	flag.StringVar(&serverIp, "ip", serverIp, "the target server's ip address")
+	flag.Parse()
+
+	lis, err := net.Listen("tcp", serverIp+":"+strconv.Itoa(port))
 	if err != nil {
 		log.Printf("failed to listen: %v", err)
 		return

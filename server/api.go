@@ -40,7 +40,7 @@ func NewServerMgr() *ServerMgr {
 
 func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
 	key := getReq.GetKey()
-	log.Printf("Get key: %s", key)
+	// log.Printf("Get key: %s", key)
 	val, err := getHelper(s, key)
 	return &pb.GetResponse{Value: val}, err
 
@@ -48,7 +48,7 @@ func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResp
 
 func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, error) {
 	key, value := setReq.GetKey(), setReq.GetValue()
-	log.Printf("Set key: %s, value: %s", key, value)
+	// log.Printf("Set key: %s, value: %s", key, value)
 	err := writeAheadLog(s, key, value)
 	if err != nil {
 		return &pb.Empty{}, nil
@@ -59,7 +59,7 @@ func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, 
 
 func (s *ServerMgr) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixRequest) (*pb.GetPrefixResponse, error) {
 	res := prefixHelper(s, getPrefixReq.GetKey())
-	log.Printf("Get prefix: %s", getPrefixReq.GetKey())
+	// log.Printf("Get prefix: %s", getPrefixReq.GetKey())
 	if len(res) > 0 {
 		return &pb.GetPrefixResponse{Values: res}, nil
 	}

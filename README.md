@@ -21,7 +21,8 @@ go run client/client.go
 
 ## Use Docker to build environment
 `docker build -t [tag-name-for-image] -f .\Dockerfile .`
-`docker run -it -p 6000:6000 [tag-name-for-image]`
+`docker run -it -p 6000:6000 -v `pwd`:/app --name [name-of-container] [tag-name-for-image]`
+`docker exec -it [name-of-container] bash`
 
 ## Milestone
 - [x] Start with a simple GRPC server and client, make sure communication between each other.

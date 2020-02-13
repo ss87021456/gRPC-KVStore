@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,10 +74,20 @@ func sendrequest(client pb.KVStoreClient, in <-chan node, wg *sync.WaitGroup) {
 	}
 }
 
-var COUNT int = 20
+var COUNT int = 100000
+var serverIp = "localhost"
+var port = 6000
+var mode = "interative"
 
 func main() {
-	conn, err := grpc.Dial("localhost:6000", grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
+	flag.IntVar(&port, "p", port, "the target server's port")
+	flag.StringVar(&serverIp, "ip", serverIp, "the target server's ip address")
+	flag.StringVar(&mode, "mode", mode, "the mode of client, interative or benchmark")
+	flag.Parse()
+
+	log.Printf("After parsing...\n")
+
+	conn, err := grpc.Dial(serverIp+":"+strconv.Itoa(port), grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
 	if err != nil {
 		fmt.Printf("failed to connect to server: %s", err)
 		return
@@ -83,80 +95,96 @@ func main() {
 	defer conn.Close()
 	client := pb.NewKVStoreClient(conn)
 
-	start := time.Now()
-	in := make(chan node)
-	go func(count int, in chan node) {
-		for i := 0; i < count; i++ {
-			n := node{key: RandStringBytesMaskImpr(keyLength), value: fmt.Sprintf("%d", i), action: rand.Intn(3)}
-			in <- n
-		}
-		close(in)
-	}(COUNT, in)
+	if mode == "benchmark" {
+		/*
+			First, you will set the value size to 512B, 4KB, 512KB, 1MB, 4MB and measure the end-to-end latency
+			for the following two workloads using a single client
 
-	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go sendrequest(client, in, &wg)
+			a read-only workload
+			a 50% reads and 50% writes workload
+			For all workloads, the key distribution must be uniform, i.e., all keys are equally likely to be read and updated.
+		*/
+		var opsCount = make([]int, 3)
+		start := time.Now()
+
+		in := make(chan node)
+		go func(count int, in chan node) {
+			for i := 0; i < count; i++ {
+				n := node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(512), action: rand.Intn(2)}
+				opsCount[n.action]++
+				in <- n
+			}
+			close(in)
+		}(COUNT, in)
+
+		var wg sync.WaitGroup
+		for i := 0; i < 4; i++ {
+			wg.Add(1)
+			go sendrequest(client, in, &wg)
+		}
+		wg.Wait()
+
+		// fmt.Println(getPrefixKey(client, "1"))
+		info := fmt.Sprintf("elapsed time: %s Total getCount: %d setCount: %d", time.Since(start), opsCount[0], opsCount[1])
+		log.Print(info) // benchmark time
 	}
-	wg.Wait()
 
-	fmt.Println(getPrefixKey(client, "1"))
-	fmt.Println(time.Since(start)) // benchmark time
-
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Print("> set, get or getprefix (i.e. set key value): ")
-		text, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Printf("failed to read from stdin: %s\n", err)
-			return
-		}
-
-		items := strings.Split(text, " ")
-		if len(items) < 2 {
-			continue
-		}
-
-		for i := range items {
-			items[i] = strings.TrimSpace(items[i])
-		}
-
-		switch items[0] {
-		case "get":
-			value, err := getKey(client, items[1])
+	if mode == "interative" {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			fmt.Print("> set, get or getprefix (i.e. set key value): ")
+			text, err := reader.ReadString('\n')
 			if err != nil {
-				log.Printf("failed to get from server: %s\n", err)
+				fmt.Printf("failed to read from stdin: %s\n", err)
+				return
+			}
+
+			items := strings.Split(text, " ")
+			if len(items) < 2 {
 				continue
 			}
-			log.Printf("successfully get %s \n", value)
 
-		case "set":
-			if len(items) != 3 {
+			for i := range items {
+				items[i] = strings.TrimSpace(items[i])
+			}
+
+			switch items[0] {
+			case "get":
+				value, err := getKey(client, items[1])
+				if err != nil {
+					log.Printf("failed to get from server: %s\n", err)
+					continue
+				}
+				log.Printf("successfully get %s \n", value)
+
+			case "set":
+				if len(items) != 3 {
+					continue
+				}
+				if err := setKey(client, items[1], items[2]); err != nil {
+					log.Printf("failed to set to server: %s\n", err)
+					continue
+				}
+				log.Println("successfully published")
+
+			case "getprefix":
+				values, err := getPrefixKey(client, items[1])
+
+				if err != nil {
+					log.Printf("failed to get prefix from server: %s \n", err)
+					continue
+				}
+				log.Printf("successfully get %s \n", values)
+
+			default:
 				continue
 			}
-			if err := setKey(client, items[1], items[2]); err != nil {
-				log.Printf("failed to set to server: %s\n", err)
-				continue
-			}
-			log.Println("successfully published")
-
-		case "getprefix":
-			values, err := getPrefixKey(client, items[1])
-
-			if err != nil {
-				log.Printf("failed to get prefix from server: %s \n", err)
-				continue
-			}
-			log.Printf("successfully get %s \n", values)
-
-		default:
-			continue
 		}
 	}
 }
 
 func getKey(client pb.KVStoreClient, key string) (string, error) {
-	log.Printf("Getting key: %s", key)
+	// log.Printf("Getting key: %s", key)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -168,7 +196,7 @@ func getKey(client pb.KVStoreClient, key string) (string, error) {
 }
 
 func setKey(client pb.KVStoreClient, key string, value string) error {
-	log.Printf("Setting key: %s, value: %s", key, value)
+	// log.Printf("Setting key: %s, value: %s", key, value)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -180,7 +208,7 @@ func setKey(client pb.KVStoreClient, key string, value string) error {
 }
 
 func getPrefixKey(client pb.KVStoreClient, key string) ([]string, error) {
-	log.Printf("Get Prefix key: %s", key)
+	// log.Printf("Get Prefix key: %s", key)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
