@@ -22,6 +22,7 @@ go run client/client.go
 ## Use Docker to build environment
 `docker build -t [tag-name-for-image] -f .\Dockerfile .`
 `docker run -it -p 6000:6000 -v `pwd`:/app --name [name-of-container] [tag-name-for-image]`
+[windows]`docker run -it -p 6000:6000 -v C:\Users\EricaWu\_DDisk\2020_Spring\Distributed_System\Project1\gRPC-KVStore:/app --name grpc_container grpc_image `
 `docker exec -it [name-of-container] bash`
 
 ## Milestone

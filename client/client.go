@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -40,6 +41,10 @@ const (
 	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
 )
 
+type JsonData struct {
+	Key, Value string
+}
+
 // https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go
 func RandStringBytesMaskImpr(n int) string {
 	b := make([]byte, n)
@@ -62,6 +67,7 @@ func RandStringBytesMaskImpr(n int) string {
 func sendrequest(client pb.KVStoreClient, in <-chan node, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for n := range in {
+		fmt.Println(n.action)
 		switch n.action {
 		case 0:
 			getKey(client, n.key)
@@ -79,7 +85,7 @@ var COUNT int = 10000
 var serverIp = "localhost"
 var port = 6000
 var valueSize = 512
-var mode = "interative"
+var mode = "interactive"
 var modeRW = "r"
 
 func main() {
@@ -113,36 +119,25 @@ func main() {
 		var opsCount = make([]int, 3)
 		start := time.Now()
 
-		/*
-			for i := 0; i < COUNT; i++ {
-				n := node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(512), action: rand.Intn(2)}
-				opsCount[n.action]++
-				switch n.action {
-				case 0:
-					setKey(client, n.key, n.value)
-				case 1:
-					getKey(client, n.key)
-				case 2:
-					getPrefixKey(client, n.key)
-				default:
-					log.Fatal("n.action error")
-				}
-			}
-		*/
+		inputData := make(chan JsonData)
+		go LoadFromSnapshot("data.json", inputData)
+		// call func
 		in := make(chan node)
-		go func(count int, in chan node) {
-			for i := 0; i < count; i++ {
+		go func(in chan node, inputData chan JsonData) {
+			for iData := range inputData {
 				var n node
 				if modeRW == "r" {
-					n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(1)}
+					n = node{key: iData.Key, action: 0}
+					// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(1)}
 				} else if modeRW == "rw" {
-					n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(2)}
+					// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(2)}
+					n = node{key: iData.Key, value: iData.Value, action: rand.Intn(2)}
 				}
 				opsCount[n.action]++
 				in <- n
 			}
 			close(in)
-		}(COUNT, in)
+		}(in, inputData)
 
 		var wg sync.WaitGroup
 		for i := 0; i < runtime.NumCPU(); i++ {
@@ -156,7 +151,7 @@ func main() {
 		log.Print(info) // benchmark time
 	}
 
-	if mode == "interative" {
+	if mode == "interactive" {
 		reader := bufio.NewReader(os.Stdin)
 		for {
 			fmt.Print("> set, get or getprefix (i.e. set key value): ")
@@ -244,4 +239,45 @@ func getPrefixKey(client pb.KVStoreClient, key string) ([]string, error) {
 		return []string{}, fmt.Errorf("failed to get prefix key: %s: ", key)
 	}
 	return result.GetValues(), nil
+}
+
+func LoadFromSnapshot(filename string, inputData chan<- JsonData) error {
+	log.Printf("Initializing cache from file: %s\n", filename)
+	iFile, err := os.OpenFile(filename, os.O_RDONLY, os.ModePerm)
+	if err != nil {
+		log.Println("Need to create new data storage...", err)
+		return err
+	}
+	defer iFile.Close()
+
+	timestampByte := make([]byte, 10) // 10 : unix time length
+	iFile.Read(timestampByte)
+	if err != nil {
+		log.Printf("Parse timestamp encounter err: %s", err)
+	}
+	iFile.Seek(10, 0)
+	decoder := json.NewDecoder(iFile)
+	// Read the array open bracket
+	if _, err := decoder.Token(); err != nil {
+		log.Fatal("Encounter wrong json format data1...", err)
+		return err
+	}
+	// while the array contains values
+	for decoder.More() {
+		var m JsonData
+		err := decoder.Decode(&m)
+		if err != nil {
+			log.Fatal("Encounter wrong json format data3...", err)
+			return err
+		}
+		inputData <- m
+	}
+	// read closing bracket
+	if _, err := decoder.Token(); err != nil {
+		log.Fatal("Encounter wrong json format data...", err)
+		return err
+	}
+	log.Printf("Finish initializing cache from file: %s\n", filename)
+	close(inputData)
+	return nil
 }
