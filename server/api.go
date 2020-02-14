@@ -35,8 +35,8 @@ type JsonData struct {
 	Key, Value string
 }
 
-func NewServerMgr(f *os.File) *ServerMgr {
-	return &ServerMgr{inMemoryCache: cmap.New(), logFile: f}
+func NewServerMgr() *ServerMgr {
+	return &ServerMgr{inMemoryCache: cmap.New()}
 }
 
 func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
@@ -143,20 +143,23 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 1024*1024*5)
 	for scanner.Scan() {
 		arr := strings.Split(scanner.Text(), ",")
-		log.Printf("Recover: %s %s\n", arr[1], arr[2])
 		setHelper(s, arr[1], arr[2]) // arr layout -> [timestamp, key, value]
 	}
-
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("done recovery from dataset %s with size %d", filename, s.inMemoryCache.Count())
+	file.Close()
 	// perform log filtering for next time
 	newFile, err := os.OpenFile("new.log", os.O_CREATE|os.O_WRONLY, os.ModePerm)
 	newFile.Truncate(0)
 	newFile.Seek(0, 0)
-	defer newFile.Close()
 	if err != nil {
 		log.Println("Failed to create ntemporary file: new.log", err)
 	}
@@ -166,6 +169,8 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 			log.Println(err)
 		}
 	}
+	newFile.Close()
+
 	c := exec.Command("mv", "new.log", "history.log")
 	if err := c.Run(); err != nil {
 		fmt.Println("Exec mv new.log failed: ", err)

@@ -16,22 +16,17 @@ func writeAheadLog(s *ServerMgr, key string, value string) error {
 	defer s.logLock.Unlock()
 
 	outStr := fmt.Sprintf("%v,%s,%s\n", time.Now().Unix(), key, value)
-	if _, err := s.logFile.WriteString(outStr); err != nil {
+	var err error
+	if _, err = s.logFile.WriteString(outStr); err != nil {
 		log.Println(err)
 		return err
 	}
-	err := s.logFile.Sync() // ensure write to stable disk
-	if err != nil {
-		log.Println("Failed to sync into disk", err)
-		return err
-	}
-	return nil
+	return s.logFile.Sync() // ensure write to stable disk
 }
 
 func getHelper(s *ServerMgr, key string) (string, error) {
 	// Retrieve item from map.
 	if tmp, ok := s.inMemoryCache.Get(key); ok {
-		// log.Printf("key: %s val: %s", key, tmp)
 		return tmp.(string), nil
 	}
 	return "", fmt.Errorf("key: %s not exist", key)

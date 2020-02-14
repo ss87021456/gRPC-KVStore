@@ -5,23 +5,20 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/signal"
 	"strconv"
-	"syscall"
 	"time"
 
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	pb "github.com/ss87021456/gRPC-KVStore/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
-
-	panichandler "github.com/kazegusuri/grpc-panic-handler"
 )
 
 var (
-	port     int    = 6000
-	serverIp string = "localhost"
-	FILENAME string = "data.json"
+	port        int    = 6000
+	serverIp    string = "localhost"
+	FILENAME    string = "data.json"
+	datasetFile string = "history.log"
 )
 
 var (
@@ -42,6 +39,7 @@ var (
 func main() {
 	flag.IntVar(&port, "p", port, "the target server's port")
 	flag.StringVar(&serverIp, "ip", serverIp, "the target server's ip address")
+	flag.StringVar(&datasetFile, "dataset", datasetFile, "dataset for benchmark, e.g. KV_10k_128B_512B.txt")
 	flag.Parse()
 
 	lis, err := net.Listen("tcp", serverIp+":"+strconv.Itoa(port))
@@ -50,49 +48,52 @@ func main() {
 		return
 	}
 
-	logFile, err := os.OpenFile("history.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
-	defer logFile.Close()
-
-	// recovery from grpc panic
-	panichandler.InstallPanicHandler(func(r interface{}) {
-		log.Printf("panic happened: %v", r)
-		// handle panic, seems never happen; thus no idea now
-	})
-
-	s := NewServerMgr(logFile)
-	if _, err := os.Stat("history.log"); err == nil {
-		s.LoadFromHistoryLog("history.log")
+	s := NewServerMgr()
+	if _, err := os.Stat(datasetFile); err == nil {
+		s.LoadFromHistoryLog(datasetFile)
 	}
 
-	uIntOpt := grpc.UnaryInterceptor(panichandler.UnaryPanicHandler)
-	grpcServer := grpc.NewServer(uIntOpt, grpc.KeepaliveEnforcementPolicy(kaep), grpc.KeepaliveParams(kasp))
+	logFile, err := os.OpenFile("history.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
+	defer logFile.Close()
+	s.logFile = logFile
+
+	maxMsgSize := 1024 * 1024 * 16
+	grpcServer := grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
+		grpc.MaxRecvMsgSize(maxMsgSize),
+		grpc.MaxSendMsgSize(maxMsgSize),
+	)
+
 	pb.RegisterKVStoreServer(grpcServer, s)
 	log.Printf("grpc server live successfully!\n")
 
 	// save to disk every 2 minutes
-	ticker := time.NewTicker(2 * time.Minute)
-	quit := make(chan struct{})
-	go func(s *ServerMgr) {
-		for {
-			select {
-			case <-ticker.C:
-				s.SnapShot(FILENAME)
-			case <-quit:
-				ticker.Stop()
+	/*
+		ticker := time.NewTicker(2 * time.Minute)
+		quit := make(chan struct{})
+		go func(s *ServerMgr) {
+			for {
+				select {
+				case <-ticker.C:
+					s.SnapShot(FILENAME)
+				case <-quit:
+					ticker.Stop()
+				}
 			}
-		}
-	}(s)
+		}(s)
 
-	go func(q chan struct{}, s *ServerMgr) {
-		// graceful shutdown
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-		<-c
-		close(quit)
-		s.SnapShot(FILENAME)
-		log.Printf("graceful shutdown, finished snapshot..")
-		os.Exit(1)
-	}(quit, s)
+		go func(q chan struct{}, s *ServerMgr) {
+			// graceful shutdown
+			c := make(chan os.Signal, 1)
+			signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+			<-c
+			close(quit)
+			s.SnapShot(FILENAME)
+			log.Printf("graceful shutdown, finished snapshot..")
+			os.Exit(1)
+		}(quit, s)
+	*/
 
 	if err = grpcServer.Serve(lis); err != nil {
 		log.Printf("server has shut down: %v", err)

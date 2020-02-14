@@ -67,12 +67,14 @@ func RandStringBytesMaskImpr(n int) string {
 func sendrequest(client pb.KVStoreClient, in <-chan node, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for n := range in {
-		fmt.Println(n.action)
 		switch n.action {
 		case 0:
 			getKey(client, n.key)
 		case 1:
-			setKey(client, n.key, n.value)
+			err := setKey(client, n.key, n.value)
+			if err != nil {
+				log.Printf("err: %s\n", err)
+			}
 		case 2:
 			getPrefixKey(client, n.key)
 		default:
@@ -81,20 +83,24 @@ func sendrequest(client pb.KVStoreClient, in <-chan node, wg *sync.WaitGroup) {
 	}
 }
 
-var COUNT int = 10000
+var COUNT int = 200
 var serverIp = "localhost"
 var port = 6000
-var valueSize = 512
+var valueSize = 4194304
 var mode = "interactive"
 var modeRW = "r"
+var datasetFile = "KV_10k_128B_512B.txt"
+var exp_time = 60
 
 func main() {
 	flag.IntVar(&port, "p", port, "the target server's port")
 	flag.StringVar(&serverIp, "ip", serverIp, "the target server's ip address")
 	flag.IntVar(&valueSize, "size", valueSize, "value size")
 	flag.IntVar(&COUNT, "count", COUNT, "ops total count")
+	flag.IntVar(&exp_time, "exp_time", exp_time, "total experiment time")
 	flag.StringVar(&mode, "mode", mode, "the mode of client, interative or benchmark")
 	flag.StringVar(&modeRW, "modeRW", modeRW, "the mode of client action, `r` for readonly, `rw` for 50% read 50% write")
+	flag.StringVar(&datasetFile, "dataset", datasetFile, "dataset for benchmark, e.g. KV_10k_128B_512B.txt")
 	flag.Parse()
 
 	log.Printf("After parsing...\n")
@@ -119,25 +125,42 @@ func main() {
 		var opsCount = make([]int, 3)
 		start := time.Now()
 
-		inputData := make(chan JsonData)
-		go LoadFromSnapshot("data.json", inputData)
-		// call func
+		dataset := LoadFromHistoryLog(datasetFile)
+
+		// inputData := make(chan JsonData)
+		// go LoadFromSnapshot("data.json", inputData)
+		/* call func */
 		in := make(chan node)
-		go func(in chan node, inputData chan JsonData) {
-			for iData := range inputData {
-				var n node
-				if modeRW == "r" {
-					n = node{key: iData.Key, action: 0}
-					// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(1)}
-				} else if modeRW == "rw" {
-					// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(2)}
-					n = node{key: iData.Key, value: iData.Value, action: rand.Intn(2)}
+		// go func(in chan node, inputData chan JsonData) {
+		// 	for iData := range inputData {
+		timeout := time.After(time.Duration(exp_time) * time.Second)
+		go func(count int, in chan node) {
+			// for i := 0; i < count; i++ {
+			for {
+				select {
+				case <-timeout:
+					close(in)
+					return
+				default:
+					var n node
+					// log.Printf("len of dataset:%d\n", len(dataset))
+					index := rand.Intn(len(dataset))
+
+					if modeRW == "r" {
+						n = node{key: dataset[index].Key, action: 0}
+						// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(1)}
+					} else if modeRW == "rw" {
+						n = node{key: dataset[index].Key, value: dataset[index].Value, action: rand.Intn(2)}
+						// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: 1}
+						// log.Printf("key: %v, value len: %d\n", n.key, len(n.value))
+						// n = node{key: iData.Key, value: iData.Value, action: rand.Intn(2)}
+					}
+					opsCount[n.action]++
+					in <- n
 				}
-				opsCount[n.action]++
-				in <- n
 			}
-			close(in)
-		}(in, inputData)
+			// }(in, inputData)
+		}(COUNT, in)
 
 		var wg sync.WaitGroup
 		for i := 0; i < runtime.NumCPU(); i++ {
@@ -146,7 +169,6 @@ func main() {
 		}
 		wg.Wait()
 
-		// fmt.Println(getPrefixKey(client, "1"))
 		info := fmt.Sprintf("elapsed time: %s Total getCount: %d setCount: %d", time.Since(start), opsCount[0], opsCount[1])
 		log.Print(info) // benchmark time
 	}
@@ -218,13 +240,13 @@ func getKey(client pb.KVStoreClient, key string) (string, error) {
 }
 
 func setKey(client pb.KVStoreClient, key string, value string) error {
-	// log.Printf("Setting key: %s, value: %s", key, value)
+	// log.Printf("Setting key: %s, value: %d", key, len(value))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	_, err := client.Set(ctx, &pb.SetRequest{Key: key, Value: value})
 	if err != nil {
-		return fmt.Errorf("failed to get key: %s: %s, with error: %s", key, value, err)
+		return fmt.Errorf("failed to set key: %s, with error: %s", key, err)
 	}
 	return nil
 }
@@ -280,4 +302,26 @@ func LoadFromSnapshot(filename string, inputData chan<- JsonData) error {
 	log.Printf("Finish initializing cache from file: %s\n", filename)
 	close(inputData)
 	return nil
+}
+
+func LoadFromHistoryLog(filename string) []JsonData {
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	var dataset []JsonData
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 1024*1024*5)
+	for scanner.Scan() {
+		arr := strings.Split(scanner.Text(), ",")
+		dataset = append(dataset, JsonData{Key: arr[1], Value: arr[2]})
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("done parsing dataset %s with dataset size %d\n", filename, len(dataset))
+	return dataset
 }
