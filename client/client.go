@@ -9,7 +9,6 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,54 +123,88 @@ func main() {
 			For all workloads, the key distribution must be uniform, i.e., all keys are equally likely to be read and updated.
 		*/
 		var opsCount = make([]int, 3)
+		dataset := LoadFromHistoryLog(datasetFile)
 		start := time.Now()
 
-		dataset := LoadFromHistoryLog(datasetFile)
-
 		/* call func */
-		in := make(chan node)
 		timeout := time.After(time.Duration(exp_time) * time.Second)
-		go func(count int, in chan node) {
-			// for i := 0; i < count; i++ {
-			// 	if i%10000 == 0 {
-			// 		log.Printf("progress: %d / %d\n", i, count)
-			// 	}
+		/*
+			in := make(chan node)
+			go func(count int, in chan node) {
+				// for i := 0; i < count; i++ {
+				// 	if i%10000 == 0 {
+				// 		log.Printf("progress: %d / %d\n", i, count)
+				// 	}
 
-			for {
-				select {
-				case <-timeout:
-					close(in)
-					return
-				default:
-					var n node
-					// log.Printf("len of dataset:%d\n", len(dataset))
-					index := rand.Intn(len(dataset))
+				for {
+					select {
+					case <-timeout:
+						close(in)
+						return
+					default:
+						var n node
+						// log.Printf("len of dataset:%d\n", len(dataset))
+						index := rand.Intn(len(dataset))
 
-					if modeRW == "r" {
-						n = node{key: dataset[index].Key, action: 0}
-						// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: 0}
-					} else if modeRW == "rw" {
-						n = node{key: dataset[index].Key, value: dataset[index].Value, action: rand.Intn(2)}
-						// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: 1}
-						// log.Printf("key: %v, value len: %d\n", n.key, len(n.value))
-						// n = node{key: iData.Key, value: iData.Value, action: rand.Intn(2)}
+						if modeRW == "r" {
+							n = node{key: dataset[index].Key, action: 0}
+							// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: 0}
+						} else if modeRW == "rw" {
+							n = node{key: dataset[index].Key, value: dataset[index].Value, action: rand.Intn(2)}
+							// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: 1}
+							// log.Printf("key: %v, value len: %d\n", n.key, len(n.value))
+							// n = node{key: iData.Key, value: iData.Value, action: rand.Intn(2)}
+						}
+						opsCount[n.action]++
+						in <- n
 					}
-					opsCount[n.action]++
-					in <- n
 				}
+				// }(in, inputData)
+			}(COUNT, in)
+
+			var wg sync.WaitGroup
+			for i := 0; i < runtime.NumCPU(); i++ {
+				wg.Add(1)
+				go sendrequest(client, in, &wg)
 			}
-			// }(in, inputData)
-		}(COUNT, in)
+			wg.Wait()
+			info := fmt.Sprintf("elapsed time: %s Total getCount: %d setCount: %d total: %d", time.Since(start), opsCount[0], opsCount[1], opsCount[0]+opsCount[1])
+			log.Print(info) // benchmark time
+		*/
+		for {
+			select {
+			case <-timeout:
+				info := fmt.Sprintf("elapsed time: %s Total getCount: %d setCount: %d total: %d", time.Since(start), opsCount[0], opsCount[1], opsCount[0]+opsCount[1])
+				log.Print(info) // benchmark time
+				return
+			default:
+				var n node
+				index := rand.Intn(len(dataset))
 
-		var wg sync.WaitGroup
-		for i := 0; i < runtime.NumCPU(); i++ {
-			wg.Add(1)
-			go sendrequest(client, in, &wg)
+				if modeRW == "r" {
+					n = node{key: dataset[index].Key, action: 0}
+				} else if modeRW == "rw" {
+					n = node{key: dataset[index].Key, value: dataset[index].Value, action: rand.Intn(2)}
+				}
+				opsCount[n.action]++
+
+				switch n.action {
+				case 0:
+					getKey(client, n.key)
+				case 1:
+					err := setKey(client, n.key, n.value)
+					if err != nil {
+						log.Printf("err: %s\n", err)
+					}
+				case 2:
+					getPrefixKey(client, n.key)
+				default:
+					log.Fatal("n.action error")
+				}
+
+			}
 		}
-		wg.Wait()
 
-		info := fmt.Sprintf("elapsed time: %s Total getCount: %d setCount: %d total: %d", time.Since(start), opsCount[0], opsCount[1], opsCount[0]+opsCount[1])
-		log.Print(info) // benchmark time
 	}
 
 	if mode == "interactive" {
