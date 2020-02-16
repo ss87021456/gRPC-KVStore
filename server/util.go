@@ -55,7 +55,7 @@ func checkTuples(items <-chan cmap.Tuple, prefix string) <-chan string {
 	out := make(chan string) // maybe buffer will be helpful
 	go func() {
 		for item := range items {
-			if strings.Contains(item.Key, prefix) {
+			if strings.HasPrefix(item.Key, prefix) {
 				out <- item.Val.(string)
 			}
 		}

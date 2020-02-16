@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -155,26 +156,26 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 	}
 	log.Printf("done recovery from dataset %s with size %d", filename, s.inMemoryCache.Count())
 	file.Close()
-	/*
-		// perform log filtering for next time
-		newFile, err := os.OpenFile("new.log", os.O_CREATE|os.O_WRONLY, os.ModePerm)
-		newFile.Truncate(0)
-		newFile.Seek(0, 0)
-		if err != nil {
-			log.Println("Failed to create ntemporary file: new.log", err)
-		}
-		for m := range s.inMemoryCache.Iter() {
-			outStr := fmt.Sprintf("%v,%s,%s\n", time.Now().Unix(), m.Key, m.Val)
-			if _, err := newFile.WriteString(outStr); err != nil {
-				log.Println(err)
-			}
-		}
-		newFile.Close()
 
-		c := exec.Command("mv", "new.log", "history.log")
-		if err := c.Run(); err != nil {
-			fmt.Println("Exec mv new.log failed: ", err)
-		}*/
+	// log compaction
+	newFile, err := os.OpenFile("new.log", os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	newFile.Truncate(0)
+	newFile.Seek(0, 0)
+	if err != nil {
+		log.Println("Failed to create ntemporary file: new.log", err)
+	}
+	for m := range s.inMemoryCache.Iter() {
+		outStr := fmt.Sprintf("%v,%s,%s\n", time.Now().Unix(), m.Key, m.Val)
+		if _, err := newFile.WriteString(outStr); err != nil {
+			log.Println(err)
+		}
+	}
+	newFile.Close()
+
+	c := exec.Command("mv", "new.log", "history.log")
+	if err := c.Run(); err != nil {
+		fmt.Println("Exec mv new.log failed: ", err)
+	}
 
 	return nil
 }
