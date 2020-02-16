@@ -93,6 +93,7 @@ var datasetFile = "KV_10k_128B_512B.txt"
 var exp_time = 60
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	flag.IntVar(&port, "p", port, "the target server's port")
 	flag.StringVar(&serverIp, "ip", serverIp, "the target server's ip address")
 	flag.IntVar(&valueSize, "size", valueSize, "value size")
@@ -127,15 +128,15 @@ func main() {
 
 		dataset := LoadFromHistoryLog(datasetFile)
 
-		// inputData := make(chan JsonData)
-		// go LoadFromSnapshot("data.json", inputData)
 		/* call func */
 		in := make(chan node)
-		// go func(in chan node, inputData chan JsonData) {
-		// 	for iData := range inputData {
 		timeout := time.After(time.Duration(exp_time) * time.Second)
 		go func(count int, in chan node) {
 			// for i := 0; i < count; i++ {
+			// 	if i%10000 == 0 {
+			// 		log.Printf("progress: %d / %d\n", i, count)
+			// 	}
+
 			for {
 				select {
 				case <-timeout:
@@ -148,7 +149,7 @@ func main() {
 
 					if modeRW == "r" {
 						n = node{key: dataset[index].Key, action: 0}
-						// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: rand.Intn(1)}
+						// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: 0}
 					} else if modeRW == "rw" {
 						n = node{key: dataset[index].Key, value: dataset[index].Value, action: rand.Intn(2)}
 						// n = node{key: RandStringBytesMaskImpr(keyLength), value: RandStringBytesMaskImpr(valueSize), action: 1}
@@ -169,7 +170,7 @@ func main() {
 		}
 		wg.Wait()
 
-		info := fmt.Sprintf("elapsed time: %s Total getCount: %d setCount: %d", time.Since(start), opsCount[0], opsCount[1])
+		info := fmt.Sprintf("elapsed time: %s Total getCount: %d setCount: %d total: %d", time.Since(start), opsCount[0], opsCount[1], opsCount[0]+opsCount[1])
 		log.Print(info) // benchmark time
 	}
 

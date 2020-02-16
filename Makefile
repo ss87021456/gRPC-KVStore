@@ -6,4 +6,4 @@ build:
 	cd client/ && go build
 
 clean:
-	rm server/server client/client data.json history.log
+	rm server/server client/client data.json history.log new.log

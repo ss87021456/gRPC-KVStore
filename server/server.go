@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -48,10 +49,13 @@ func main() {
 		return
 	}
 
+	start := time.Now()
 	s := NewServerMgr()
 	if _, err := os.Stat(datasetFile); err == nil {
 		s.LoadFromHistoryLog(datasetFile)
 	}
+	info := fmt.Sprintf("elapsed time: %s to recover fron %s", time.Since(start), datasetFile)
+	log.Printf(info)
 
 	logFile, err := os.OpenFile("history.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	defer logFile.Close()
