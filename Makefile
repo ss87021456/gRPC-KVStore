@@ -2,8 +2,8 @@ protoc:
 	protoc -I proto/ proto/*.proto --go_out=plugins=grpc:proto
 
 build:
-	cd server/ && go build
-	cd client/ && go build
+	cd server/ && go build -o kvserver
+	cd client/ && go build -o kvclient
 
 clean:
-	rm server/server client/client data.json history.log new.log
+	rm server/kvserver client/kvclient data.json history.log new.log

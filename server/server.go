@@ -20,6 +20,7 @@ var (
 	serverIp    string = "localhost"
 	FILENAME    string = "data.json"
 	datasetFile string = "history.log"
+	mode        string = "normal"
 )
 
 var (
@@ -39,6 +40,7 @@ var (
 
 func main() {
 	flag.IntVar(&port, "p", port, "the target server's port")
+	flag.StringVar(&mode, "mode", mode, "server's mode e.g. normal and test mode")
 	flag.StringVar(&serverIp, "ip", serverIp, "the target server's ip address")
 	flag.StringVar(&datasetFile, "dataset", datasetFile, "dataset for benchmark, e.g. KV_10k_128B_512B.txt")
 	flag.Parse()
@@ -72,34 +74,8 @@ func main() {
 	pb.RegisterKVStoreServer(grpcServer, s)
 	log.Printf("grpc server live successfully!\n")
 
-	// save to disk every 2 minutes
-	/*
-		ticker := time.NewTicker(2 * time.Minute)
-		quit := make(chan struct{})
-		go func(s *ServerMgr) {
-			for {
-				select {
-				case <-ticker.C:
-					s.SnapShot(FILENAME)
-				case <-quit:
-					ticker.Stop()
-				}
-			}
-		}(s)
-
-		go func(q chan struct{}, s *ServerMgr) {
-			// graceful shutdown
-			c := make(chan os.Signal, 1)
-			signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-			<-c
-			close(quit)
-			s.SnapShot(FILENAME)
-			log.Printf("graceful shutdown, finished snapshot..")
-			os.Exit(1)
-		}(quit, s)
-	*/
-
 	if err = grpcServer.Serve(lis); err != nil {
 		log.Printf("server has shut down: %v", err)
 	}
+
 }
