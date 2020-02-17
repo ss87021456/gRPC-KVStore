@@ -167,7 +167,9 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 	scanner.Buffer(buf, 1024*1024*5)
 	for scanner.Scan() {
 		arr := strings.Split(scanner.Text(), ",")
-		setHelper(s, arr[1], arr[2]) // arr layout -> [timestamp, key, value]
+		if arr[3] == "done" { // checksum-like detection
+			setHelper(s, arr[1], arr[2]) // arr layout -> [timestamp, key, value]
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
@@ -183,7 +185,7 @@ func (s *ServerMgr) LoadFromHistoryLog(filename string) error {
 		log.Println("Failed to create ntemporary file: new.log", err)
 	}
 	for m := range s.inMemoryCache.Iter() {
-		outStr := fmt.Sprintf("%v,%s,%s\n", time.Now().Unix(), m.Key, m.Val)
+		outStr := fmt.Sprintf("%v,%s,%s,done\n", time.Now().Unix(), m.Key, m.Val)
 		if _, err := newFile.WriteString(outStr); err != nil {
 			log.Println(err)
 		}

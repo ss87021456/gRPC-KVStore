@@ -15,7 +15,7 @@ func writeAheadLog(s *ServerMgr, key string, value string) error {
 	s.logLock.Lock()
 	defer s.logLock.Unlock()
 
-	outStr := fmt.Sprintf("%v,%s,%s\n", time.Now().Unix(), key, value)
+	outStr := fmt.Sprintf("%v,%s,%s,done\n", time.Now().Unix(), key, value) // done for the checksum
 	var err error
 	if _, err = s.logFile.WriteString(outStr); err != nil {
 		log.Println(err)
