@@ -21,6 +21,7 @@ var (
 	FILENAME    string = "data.json"
 	datasetFile string = "history.log"
 	mode        string = "normal"
+	exp_time    int    = 120
 )
 
 var (
@@ -40,6 +41,7 @@ var (
 
 func main() {
 	flag.IntVar(&port, "p", port, "the target server's port")
+	flag.IntVar(&exp_time, "exp_time", exp_time, "server's up time for testing")
 	flag.StringVar(&mode, "mode", mode, "server's mode e.g. normal and test mode")
 	flag.StringVar(&serverIp, "ip", serverIp, "the target server's ip address")
 	flag.StringVar(&datasetFile, "dataset", datasetFile, "dataset for benchmark, e.g. KV_10k_128B_512B.txt")
@@ -52,7 +54,7 @@ func main() {
 	}
 
 	start := time.Now()
-	s := NewServerMgr()
+	s := NewServerMgr(mode)
 	if _, err := os.Stat(datasetFile); err == nil {
 		s.LoadFromHistoryLog(datasetFile)
 	}
@@ -73,6 +75,18 @@ func main() {
 
 	pb.RegisterKVStoreServer(grpcServer, s)
 	log.Printf("grpc server live successfully!\n")
+
+	if mode == "test" {
+		start := time.Now()
+		go func() {
+			<-time.After(time.Duration(exp_time) * time.Second)
+			opsCount := s.opsCount
+			grpcServer.Stop()
+			// server start time, #total_sets done, #total_gets done, #total_getprefixes done
+			log.Printf("server start time: %s, #total_sets: %d, #total_gets: %d, #total_getprefixes: %d\n",
+				time.Since(start), opsCount[0], opsCount[1], opsCount[2])
+		}()
+	}
 
 	if err = grpcServer.Serve(lis); err != nil {
 		log.Printf("server has shut down: %v", err)

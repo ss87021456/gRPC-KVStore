@@ -22,6 +22,9 @@ type ServerMgr struct {
 	lastSnapTime  int64
 	logLock       sync.Mutex
 	logFile       *os.File
+	countLock     sync.Mutex
+	opsCount      []int
+	mode          string
 }
 
 type SharedCache []*SingleCache
@@ -35,14 +38,19 @@ type JsonData struct {
 	Key, Value string
 }
 
-func NewServerMgr() *ServerMgr {
-	return &ServerMgr{inMemoryCache: cmap.New()}
+func NewServerMgr(mode string) *ServerMgr {
+	return &ServerMgr{inMemoryCache: cmap.New(), opsCount: make([]int, 3), mode: mode}
 }
 
 func (s *ServerMgr) Get(ctx context.Context, getReq *pb.GetRequest) (*pb.GetResponse, error) {
 	key := getReq.GetKey()
 	// log.Printf("Get key: %s", key)
 	val, err := getHelper(s, key)
+	if s.mode == "test" {
+		s.countLock.Lock()
+		s.opsCount[0]++
+		s.countLock.Unlock()
+	}
 	return &pb.GetResponse{Value: val}, err
 
 }
@@ -55,12 +63,22 @@ func (s *ServerMgr) Set(ctx context.Context, setReq *pb.SetRequest) (*pb.Empty, 
 		return &pb.Empty{}, nil
 	}
 	setHelper(s, key, value)
+	if s.mode == "test" {
+		s.countLock.Lock()
+		s.opsCount[1]++
+		s.countLock.Unlock()
+	}
 	return &pb.Empty{}, nil
 }
 
 func (s *ServerMgr) GetPrefix(ctx context.Context, getPrefixReq *pb.GetPrefixRequest) (*pb.GetPrefixResponse, error) {
 	res := prefixHelper(s, getPrefixReq.GetKey())
 	// log.Printf("Get prefix: %s", getPrefixReq.GetKey())
+	if s.mode == "test" {
+		s.countLock.Lock()
+		s.opsCount[2]++
+		s.countLock.Unlock()
+	}
 	if len(res) > 0 {
 		return &pb.GetPrefixResponse{Values: res}, nil
 	}

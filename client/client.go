@@ -168,5 +168,28 @@ func main() {
 				continue
 			}
 		}
+	} else if mode == "test" {
+		var opsCount = make([]int, 3)
+		timeout := time.After(time.Duration(exp_time) * time.Second)
+		for {
+			select {
+			case <-timeout:
+				return
+			default:
+				action := rand.Intn(3)
+				opsCount[action]++
+
+				switch action {
+				case 0:
+					getKey(client, RandStringBytesMaskImpr(keyLength))
+				case 1:
+					setKey(client, RandStringBytesMaskImpr(keyLength), RandStringBytesMaskImpr(valueSize))
+				case 2:
+					getPrefixKey(client, RandStringBytesMaskImpr(keyLength/2)) // use half
+				default:
+					log.Fatal("n.action error")
+				}
+			}
+		}
 	}
 }
