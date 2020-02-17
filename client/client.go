@@ -42,7 +42,7 @@ type node struct {
 var COUNT int = 1000
 var serverIp = "localhost"
 var port = 6000
-var valueSize = 4194304
+var valueSize = 512
 var mode = "interactive"
 var modeRW = "r"
 var datasetFile = "KV_10k_128B_512B.txt"
@@ -120,7 +120,7 @@ func main() {
 	} else if mode == "interactive" {
 		reader := bufio.NewReader(os.Stdin)
 		for {
-			fmt.Print("> set, get or getprefix (i.e. set key value): ")
+			fmt.Print("> set, get or getPrefix (i.e. set key value): ")
 			text, err := reader.ReadString('\n')
 			if err != nil {
 				fmt.Printf("failed to read from stdin: %s\n", err)
@@ -155,7 +155,7 @@ func main() {
 				}
 				log.Println("successfully published")
 
-			case "getprefix":
+			case "getPrefix":
 				values, err := getPrefixKey(client, items[1])
 
 				if err != nil {
