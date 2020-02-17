@@ -11,11 +11,11 @@ make build
 # this script will setup 1 server and 10 client
 CLIENT_NUM=10
 
-./server/kvserver -mode test -exp_time 30 -p 8888 &
+./server/kvserver -mode test -exp_time 10 -p 8888 &
 
 for i in `eval echo {1..$CLIENT_NUM}`
 do
-    ./client/kvclient -mode test -exp_time 20 -p 8888 &
+    ./client/kvclient -mode test -exp_time 5 -p 8888 &
 done
 
 exit 0
