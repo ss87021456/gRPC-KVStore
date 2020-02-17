@@ -11,22 +11,34 @@ The goal of this project to get some experience building a simple distributed sy
 ## Goal
 In addition to performance, you must also validate correctness, particularly, that your store provides strong durability in the presence of failures. E.g. randomly crash the server when a workload is running and checking if the server can recover all written data. 
 
-## Usage
+## Quick start
+```
+# this will setup 1 server with 10 client, and up for 30 sec.
+./test.sh
+```
+
+## General Usage for OSX, Linux
+```
+make build
+```
 Server
 ```
-cd server/ && go build
-cd ../ && ./server/server
+./server/kvserver
 ```
 Client
 ```
-go run client/client.go
+./client/kvclient
 ```
 
 ## Use Docker to build environment
-`docker build -t [tag-name-for-image] -f .\Dockerfile .` <br>
-`docker run -it -p 6000:6000 -v `pwd`:/app --name [name-of-container] [tag-name-for-image]` <br>
-[Windows]`docker run -it -p 6000:6000 -v C:\Users\EricaWu\_DDisk\2020_Spring\Distributed_System\Project1\gRPC-KVStore:/app --name grpc_container grpc_image ` <br>
-`docker exec -it [name-of-container] bash` <br>
+```
+docker build -t [tag-name-for-image] -f Dockerfile . <br>
+docker run -it -p 6000:6000 -v `pwd`:/app --name [name-of-container] [tag-name-for-image] <br>
+docker exec -it [name-of-container] bash <br>
+
+[Windows run container]
+docker run -it -p 6000:6000 -v ${PWD}:/app --name grpc_container grpc_image <br>
+```
 
 ## Milestone
 - [x] Start with a simple GRPC server and client, make sure communication between each other.

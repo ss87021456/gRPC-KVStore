@@ -5,6 +5,9 @@
 # that perform some writes and reads (e.g., 10K). The script then must print the following stats on the console:
 # server start time, #total_sets done, #total_gets done, #total_getprefixes done. Finally, the script must stop the server.
 
+make clean
+make build
+
 # this script will setup 1 server and 10 client
 CLIENT_NUM=10
 
